@@ -15,14 +15,17 @@ from extras.danger_options import get_danger_options
 
 # Class to track each move request
 class Move:
-    def __init__(self, toolhead, start_pos, end_pos, speed):
+    def __init__(
+        self, toolhead, start_pos, end_pos, speed, skip_junction=False
+    ):
+        self.skip_junction = skip_junction
         self.toolhead = toolhead
         self.start_pos = tuple(start_pos)
         self.end_pos = tuple(end_pos)
         self.accel = toolhead.max_accel
         self.equilateral_corner_v2 = toolhead.equilateral_corner_v2
         self.timing_callbacks = []
-        velocity = min(speed, toolhead.max_velocity)
+        self.velocity = min(speed, toolhead.max_velocity)
         self.is_kinematic_move = True
         self.axes_d = axes_d = [end_pos[i] - start_pos[i] for i in (0, 1, 2, 3)]
         self.move_d = move_d = math.sqrt(sum([d * d for d in axes_d[:3]]))
@@ -40,17 +43,17 @@ class Move:
             if move_d:
                 inv_move_d = 1.0 / move_d
             self.accel = 99999999.9
-            velocity = speed
+            self.velocity = speed
             self.is_kinematic_move = False
         else:
             inv_move_d = 1.0 / move_d
         self.axes_r = [d * inv_move_d for d in axes_d]
-        self.min_move_t = move_d / velocity
+        self.min_move_t = move_d / self.velocity
         # Junction speeds are tracked in velocity squared.  The
         # delta_v2 is the maximum amount of this squared-velocity that
         # can change in this move.
         self.max_start_v2 = 0.0
-        self.max_cruise_v2 = velocity**2
+        self.max_cruise_v2 = self.velocity**2
         self.delta_v2 = 2.0 * move_d * self.accel
         self.max_smoothed_v2 = 0.0
         self.smooth_delta_v2 = 2.0 * move_d * toolhead.max_accel_to_decel
@@ -59,10 +62,20 @@ class Move:
         speed2 = speed**2
         if speed2 < self.max_cruise_v2:
             self.max_cruise_v2 = speed2
+            self.velocity = speed
             self.min_move_t = self.move_d / speed
         self.accel = min(self.accel, accel)
         self.delta_v2 = 2.0 * self.move_d * self.accel
         self.smooth_delta_v2 = min(self.smooth_delta_v2, self.delta_v2)
+
+    def set_speed(self, speed, accel):
+        speed2 = speed**2
+        self.max_cruise_v2 = speed2
+        self.min_move_t = self.move_d / speed
+        self.accel = accel
+        self.delta_v2 = 2.0 * self.move_d * self.accel
+        self.velocity = speed
+        self.smooth_delta_v2 = self.delta_v2
 
     def move_error(self, msg="Move out of range"):
         ep = self.end_pos
@@ -217,7 +230,7 @@ class LookAheadQueue:
 
     def add_move(self, move):
         self.queue.append(move)
-        if len(self.queue) == 1:
+        if len(self.queue) == 1 or move.skip_junction:
             return
         move.calc_junction(self.queue[-2])
         self.junction_flush -= move.min_move_t
