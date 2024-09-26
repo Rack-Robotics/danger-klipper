@@ -1,10 +1,13 @@
-from . import pwm_in
+from pwm_in import PWMIn
 import math
 from typing import TYPE_CHECKING
 from simple_pid import PID
 import logging
 from toolhead import Move
-
+from load_cell import load_config as load_cell_load_config
+from load_cell import LoadCell
+from klippy.virtual_configfile import VirtualConfigFile
+from pwm_tool import PrinterOutputPin
 
 if TYPE_CHECKING:
     from ..toolhead import ToolHead
@@ -79,7 +82,7 @@ class PowerCore:
             "verbose_move_scaling_output", False
         )
 
-        self.pid_controller = PID(
+        self.feedrate_pid_controller = PID(
             Kp=config.getfloat("pid_kp", 0.1),
             Ki=config.getfloat("pid_ki", 0.0),
             Kd=config.getfloat("pid_kd", 0.0),
@@ -98,10 +101,129 @@ class PowerCore:
         self.scaling_enabled = False
         self.move_with_transform = None
 
+        ### Wire tension control
+        self.wire_load_cell: LoadCell = load_cell_load_config(config)
+        self.wire_load_cell.sensor.add_client(self.wire_tension_callback)
+
+        self.default_wire_tension_target = config.getfloat(
+            "default_wire_tension_target", 0.0
+        )
+        self.wire_pid_controller = PID(
+            Kp=config.getfloat("wire_pid_kp", 0.1),
+            Ki=config.getfloat("wire_pid_ki", 0.0),
+            Kd=config.getfloat("wire_pid_kd", 0.0),
+            setpoint=self.default_wire_tension_target,
+            output_limits=(0, 1),
+            sample_time=self.wire_load_cell.sensor.UPDATE_INTERVAL,
+            # TODO: could make this configurable?
+            time_fn=self.reactor.monotonic,
+        )
+        self.wire_tension_loop_enabled = True
+        self.sender_wire_tool = WireMover(
+            self.toolhead,
+            config.get("sender_wire_motor_pin"),
+            config.getfloat("sender_wire_cycle_time", 0.1),
+            config.getboolean("sender_wire_hardware_pwm", False),
+            config.getfloat("sender_wire_scale", 1.0),
+        )
+        self.receiver_wire_tool = WireMover(
+            self.toolhead,
+            config.get("receiver_wire_motor_pin"),
+            config.getfloat("receiver_wire_cycle_time", 0.1),
+            config.getboolean("receiver_wire_hardware_pwm", False),
+            config.getfloat("receiver_wire_scale", 1.0),
+        )
+        self.sender_is_primary = config.getboolean("sender_is_primary", True)
+        self.gcode.register_command(
+            "ENABLE_WIRE_TENSION_LOOP",
+            self.cmd_ENABLE_WIRE_TENSION_LOOP,
+            desc="enable/disable wire tension loop with ENABLE param",
+        )
+        self.gcode.register_command(
+            "SET_WIRE_TENSION_TARGET",
+            self.cmd_SET_WIRE_TENSION_TARGET,
+            desc="set the wire tension target",
+        )
+        self.gcode.register_command(
+            "SET_WIRE_FEED",
+            self.cmd_SET_WIRE_FEED,
+            desc="set the wire feed speed",
+        )
+        self.gcode.register_command(
+            "RESET_WIRE_TENSION_PID",
+            self.cmd_RESET_WIRE_TENSION_PID,
+            desc="reset the wire tension pid controller",
+        )
+        # TODO - load routines / macros
+        # TODO - invidual motor control commands for debugging
+        # TODO - general logging for debugging
+
+    def wire_tension_callback(self, msg: dict):
+        # this is called every time the load cell sends a new sample
+        # this timing is controlled by the load cell's update interval
+        # default is 0.1s (set in `UPDATE_INTERVAL` in the sensor classes)
+        if not self.wire_tension_loop_enabled:
+            return
+        samples = msg["data"]
+        sample = samples[-1]
+        # TODO: what units is the load sensor in?
+        # do we need to normalize the data result at all?
+        # probably should convert into grams or something?
+        # - probably not hard to do or already done in the hx code
+
+        # uses the bulk sensor api.
+        # samples has all the samples since the last callback
+        # for now, only get the last sample
+        # there might be a better way to do the pid to account for all of the samples,
+        # but we'd need timing info for each one, so the pid controller knows what's up.
+        # otherwise, it could end up super jittery.
+        output = self.wire_pid_controller(sample)
+        # scale output from 0-1 to 0-255 for motor speed control
+        output = round(output * 255)
+        if self.sender_is_primary:
+            self.receiver_wire_tool.set_speed(output)
+        else:
+            self.sender_wire_tool.set_speed(output)
+
+    def cmd_SET_WIRE_FEED(self, gcmd):
+        speed = gcmd.get_float("speed")
+        # if the tension loop is not running, set both motors to the same speed
+        # otherwise, only set the primary motor speed - the control loop will handle the secondary motor
+        if not self.wire_tension_loop_enabled:
+            self.sender_wire_tool.set_speed(speed)
+            self.receiver_wire_tool.set_speed(speed)
+        else:
+            if self.sender_is_primary:
+                self.sender_wire_tool.set_speed(speed)
+            else:
+                self.receiver_wire_tool.set_speed(speed)
+        gcmd.respond_info(f"Wire feed speed set to: {speed}")
+
+    def cmd_SET_WIRE_TENSION_TARGET(self, gcmd):
+        # TODO: what units is the load sensor in?
+        target = gcmd.get_float("TARGET")
+        self.wire_pid_controller.setpoint = target
+        gcmd.respond_info(f"Wire tension target set to: {target}")
+
+    def cmd_ENABLE_WIRE_TENSION_LOOP(self, gcmd):
+        enable = gcmd.get_int("ENABLE")
+        should_enable = bool(enable)
+        self.wire_tension_loop_enabled = should_enable
+        if self.wire_tension_loop_enabled:
+            # reset the pid controller when enabling the loop, we are starting fresh
+            self.wire_pid_controller.reset()
+            gcmd.respond_info("Wire tension loop enabled")
+        else:
+            gcmd.respond_info("Wire tension loop disabled")
+
+    def cmd_RESET_WIRE_TENSION_PID(self, gcmd):
+        self.wire_pid_controller.reset()
+        gcmd.respond_info("Wire tension PID controller reset")
+
     def pwm_in_callback(self, duty_cycle):
         if not self.scaling_enabled:
             return
-        self.output = self.pid_controller(duty_cycle)
+        self.output = self.feedrate_pid_controller(duty_cycle)
         if self.verbose_pid_output:
             logging.info(f"PowerCore PID-loop output: {self.output}")
 
@@ -134,20 +256,20 @@ class PowerCore:
             )
 
     def cmd_reset_pid(self, gcmd):
-        self.pid_controller.reset()
+        self.feedrate_pid_controller.reset()
         gcmd.respond_info("Reset powercore PID")
 
     def cmd_set_target_duty_cycle(self, gcmd):
         target_duty_cycle = gcmd.get_float("DUTY_CYCLE", self.target_duty_cycle)
         self.target_duty_cycle = target_duty_cycle
-        self.pid_controller.setpoint = target_duty_cycle
+        self.feedrate_pid_controller.setpoint = target_duty_cycle
         gcmd.respond_info(f"Target duty cycle: {target_duty_cycle}")
 
     def cmd_set_pid_params(self, gcmd):
-        kp = gcmd.get_float("KP", self.pid_controller.Kp)
-        ki = gcmd.get_float("KI", self.pid_controller.Ki)
-        kd = gcmd.get_float("KD", self.pid_controller.Kd)
-        self.pid_controller.tunings = (kp, ki, kd)
+        kp = gcmd.get_float("KP", self.feedrate_pid_controller.Kp)
+        ki = gcmd.get_float("KI", self.feedrate_pid_controller.Ki)
+        kd = gcmd.get_float("KD", self.feedrate_pid_controller.Kd)
+        self.feedrate_pid_controller.tunings = (kp, ki, kd)
         gcmd.respond_info(f"PID Params: Kp: {kp}, Ki: {ki}, Kd: {kd}")
 
     def cmd_get_duty_cycle(self, gcmd):
@@ -163,7 +285,7 @@ class PowerCore:
         gcmd.respond_info("Disabled powercore move scaling")
 
     def enable_scaling(self):
-        self.pid_controller.reset()
+        self.feedrate_pid_controller.reset()
         self.scaling_enabled = True
 
     def disable_scaling(self):
@@ -266,15 +388,30 @@ class PowerCorePWMReader:
         self.sample_interval = config.getfloat(
             "alrt_sample_interval", 0.1, above=0.1
         )
-        self._pwm_in = pwm_in.PWMIn(
-            printer, pin, self.sample_interval, pwm_frequency
-        )
+        self._pwm_in = PWMIn(printer, pin, self.sample_interval, pwm_frequency)
 
     def setup_callback(self, cb):
         self._pwm_in.setup_callback(cb)
 
     def get_current_duty_cycle(self):
         return round(self._pwm_in.get_duty_cycle(), 3)
+
+
+class WireMover:
+    def __init__(self, toolhead, pin, cycle_time, hardware_pwm, scale):
+        values = {
+            "pin": pin,
+            "cycle_time": cycle_time,
+            "hardware_pwm": hardware_pwm,
+            "scale": scale,
+        }
+        config = VirtualConfigFile(values)
+        self.pwm_tool = PrinterOutputPin(config)
+        self.toolhead = toolhead
+
+    def set_speed(self, speed):
+        print_time = self.toolhead.get_last_move_time()
+        self.pwm_tool._set_pin(print_time, speed)
 
 
 def load_config(config):
