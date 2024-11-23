@@ -1,5 +1,5 @@
 import configparser
-from klippy.configfile import ConfigWrapper
+from configfile import ConfigWrapper
 
 error = configparser.Error
 
@@ -14,7 +14,9 @@ class VirtualConfigFile(ConfigWrapper):
         self.values = values
         self.printer = printer
         self.section = configparser.DEFAULTSECT
-
+        self.fileconfig = configparser.RawConfigParser(
+            strict=False, inline_comment_prefixes=(";", "#")
+        )
     def get_name(self):
         return self.name
 

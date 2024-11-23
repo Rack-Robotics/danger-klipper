@@ -1,13 +1,13 @@
-from pwm_in import PWMIn
+from extras.pwm_in import PWMIn
 import math
 from typing import TYPE_CHECKING
 from simple_pid import PID
 import logging
 from toolhead import Move
-from load_cell import load_config as load_cell_load_config
-from load_cell import LoadCell
-from klippy.virtual_configfile import VirtualConfigFile
-from pwm_tool import PrinterOutputPin
+from extras.load_cell import load_config as load_cell_load_config
+from extras.load_cell import LoadCell
+from virtual_configfile import VirtualConfigFile
+from extras.pwm_tool import PrinterOutputPin
 
 if TYPE_CHECKING:
     from ..toolhead import ToolHead
@@ -19,115 +19,122 @@ if TYPE_CHECKING:
 
 class PowerCore:
     def __init__(self, config: "ConfigWrapper"):
-        self._pwm_reader = PowerCorePWMReader(config)
-        self._pwm_reader.setup_callback(self.pwm_in_callback)
         self.printer: "Printer" = config.get_printer()
         self.reactor: "Reactor" = self.printer.get_reactor()
         self.toolhead: "ToolHead" = None
+        self.gcode: "GCodeDispatch" = self.printer.lookup_object("gcode")
+
         self.printer.register_event_handler(
             "klippy:connect", self._handle_connect
         )
-        self.gcode: "GCodeDispatch" = self.printer.lookup_object("gcode")
-        self.gcode.register_command(
-            "GET_POWERCORE_DUTY_CYCLE",
-            self.cmd_get_duty_cycle,
-            desc="Get the current duty cycle",
-        )
-        self.gcode.register_command(
-            "ENABLE_POWERCORE_FEED_SCALING",
-            self.cmd_enable_scaling,
-            desc="Enable powercore feedrate scaling",
-        )
-        self.gcode.register_command(
-            "DISABLE_POWERCORE_FEED_SCALING",
-            self.cmd_disable_scaling,
-            desc="Disable powercore feedrate scaling",
-        )
-        self.gcode.register_command(
-            "SET_POWERCORE_PID",
-            self.cmd_set_pid_params,
-            desc="Set powercore pid params",
-        )
-        self.gcode.register_command(
-            "RESET_POWERCORE_PID",
-            self.cmd_reset_pid,
-            desc="resets pid controller, recommended to do at the start of a cut",
-        )
-        self.gcode.register_command(
-            "SET_POWERCORE_TARGET_DUTY_CYCLE",
-            self.cmd_set_target_duty_cycle,
-            desc="set the target powercore target duty cycle",
-        )
-        self.gcode.register_command(
-            "SET_POWERCORE_FEED_RANGE",
-            self.cmd_set_powercore_feedrates,
-            desc="set powercore feedrates",
-        )
-        self.target_duty_cycle: float = config.getfloat(
-            "target_duty_cycle", 0.75, minval=0.0, maxval=1.0
-        )
-        self.min_feedrate: float = config.getfloat(
-            "min_feedrate", 6.0, minval=1.0
-        )  # mm/min
-        self.max_feedrate: float = config.getfloat(
-            "max_feedrate", 120.0, minval=self.min_feedrate
-        )  # mm/min
-        self.adjustment_accel = config.getfloat(
-            "powercore_adjustment_accel", 5000.0, above=0.0
-        )
 
-        # debug verbosity, helpful for tuning the pid controller
-        self.verbose_pid_output = config.getboolean("verbose_pid_output", False)
-        self.verbose_move_scaling_output = config.getboolean(
-            "verbose_move_scaling_output", False
-        )
+        self.enable_move_feat = config.getboolean('enable_move_feat', True)
+        if self.enable_move_feat:
+            self._pwm_reader = PowerCorePWMReader(config)
+            self._pwm_reader.setup_callback(self.pwm_in_callback)
+            self.gcode.register_command(
+                "GET_POWERCORE_DUTY_CYCLE",
+                self.cmd_get_duty_cycle,
+                desc="Get the current duty cycle",
+            )
+            self.gcode.register_command(
+                "ENABLE_POWERCORE_FEED_SCALING",
+                self.cmd_enable_scaling,
+                desc="Enable powercore feedrate scaling",
+            )
+            self.gcode.register_command(
+                "DISABLE_POWERCORE_FEED_SCALING",
+                self.cmd_disable_scaling,
+                desc="Disable powercore feedrate scaling",
+            )
+            self.gcode.register_command(
+                "SET_POWERCORE_PID",
+                self.cmd_set_pid_params,
+                desc="Set powercore pid params",
+            )
+            self.gcode.register_command(
+                "RESET_POWERCORE_PID",
+                self.cmd_reset_pid,
+                desc="resets pid controller, recommended to do at the start of a cut",
+            )
+            self.gcode.register_command(
+                "SET_POWERCORE_TARGET_DUTY_CYCLE",
+                self.cmd_set_target_duty_cycle,
+                desc="set the target powercore target duty cycle",
+            )
+            self.gcode.register_command(
+                "SET_POWERCORE_FEED_RANGE",
+                self.cmd_set_powercore_feedrates,
+                desc="set powercore feedrates",
+            )
+            self.target_duty_cycle: float = config.getfloat(
+                "target_duty_cycle", 0.75, minval=0.0, maxval=1.0
+            )
+            self.min_feedrate: float = config.getfloat(
+                "min_feedrate", 6.0, minval=1.0
+            )  # mm/min
+            self.max_feedrate: float = config.getfloat(
+                "max_feedrate", 120.0, minval=self.min_feedrate
+            )  # mm/min
+            self.adjustment_accel = config.getfloat(
+                "powercore_adjustment_accel", 5000.0, above=0.0
+            )
 
-        self.feedrate_pid_controller = PID(
-            Kp=config.getfloat("pid_kp", 0.1),
-            Ki=config.getfloat("pid_ki", 0.0),
-            Kd=config.getfloat("pid_kd", 0.0),
-            setpoint=self.target_duty_cycle,
-            output_limits=(0, 1),
-            sample_time=self._pwm_reader.sample_interval,
-            time_fn=self.reactor.monotonic,
-        )
-        self.move_split_dist = config.getfloat(
-            "move_split_dist", 0.1, above=0.0
-        )  # segment size for move splitting
-        self.move_overlap_time = config.getfloat("move_overlap_time", 0.001)
-        # 0 would mean we finish one move segment completely before starting the next
-        # this is likely coupled tightly with move_split_dist and the feedrate being used
+            # debug verbosity, helpful for tuning the pid controller
+            self.verbose_pid_output = config.getboolean("verbose_pid_output", False)
+            self.verbose_move_scaling_output = config.getboolean(
+                "verbose_move_scaling_output", False
+            )
 
-        self.scaling_enabled = False
-        self.move_with_transform = None
+            self.feedrate_pid_controller = PID(
+                Kp=config.getfloat("pid_kp", 0.1),
+                Ki=config.getfloat("pid_ki", 0.0),
+                Kd=config.getfloat("pid_kd", 0.0),
+                setpoint=self.target_duty_cycle,
+                output_limits=(0, 1),
+                sample_time=self._pwm_reader.sample_interval,
+                time_fn=self.reactor.monotonic,
+            )
+            self.move_split_dist = config.getfloat(
+                "move_split_dist", 0.1, above=0.0
+            )  # segment size for move splitting
+            self.move_overlap_time = config.getfloat("move_overlap_time", 0.001)
+            # 0 would mean we finish one move segment completely before starting the next
+            # this is likely coupled tightly with move_split_dist and the feedrate being used
+
+            self.scaling_enabled = False
+            self.move_with_transform = None
+
 
         ### Wire tension control
         self.wire_load_cell: LoadCell = load_cell_load_config(config)
-        self.wire_load_cell.sensor.add_client(self.wire_tension_callback)
+        
 
         self.default_wire_tension_target = config.getfloat(
             "default_wire_tension_target", 0.0
         )
-        self.wire_pid_controller = PID(
-            Kp=config.getfloat("wire_pid_kp", 0.1),
-            Ki=config.getfloat("wire_pid_ki", 0.0),
-            Kd=config.getfloat("wire_pid_kd", 0.0),
-            setpoint=self.default_wire_tension_target,
-            output_limits=(0, 1),
-            sample_time=self.wire_load_cell.sensor.UPDATE_INTERVAL,
-            # TODO: could make this configurable?
-            time_fn=self.reactor.monotonic,
-        )
+        # self.wire_pid_controller = PID(
+        #     Kp=config.getfloat("wire_pid_kp", 0.1),
+        #     Ki=config.getfloat("wire_pid_ki", 0.0),
+        #     Kd=config.getfloat("wire_pid_kd", 0.0),
+        #     setpoint=self.default_wire_tension_target,
+        #     output_limits=(0, 1),
+        #     sample_time=self.wire_load_cell.sensor.UPDATE_INTERVAL,
+        #     # TODO: could make this configurable?
+        #     time_fn=self.reactor.monotonic,
+        # )
         self.wire_tension_loop_enabled = True
         self.sender_wire_tool = WireMover(
-            self.toolhead,
+            "sender",
+            self.printer,
             config.get("sender_wire_motor_pin"),
             config.getfloat("sender_wire_cycle_time", 0.1),
             config.getboolean("sender_wire_hardware_pwm", False),
             config.getfloat("sender_wire_scale", 1.0),
         )
         self.receiver_wire_tool = WireMover(
-            self.toolhead,
+            "receiver",
+            self.printer,
             config.get("receiver_wire_motor_pin"),
             config.getfloat("receiver_wire_cycle_time", 0.1),
             config.getboolean("receiver_wire_hardware_pwm", False),
@@ -154,10 +161,16 @@ class PowerCore:
             self.cmd_RESET_WIRE_TENSION_PID,
             desc="reset the wire tension pid controller",
         )
+        self.gcode.register_command(
+            "SAMPLE_HX",
+            self.cmd_SAMPLE_HX,
+            desc="adds client"
+        )
         # TODO - load routines / macros
         # TODO - invidual motor control commands for debugging
         # TODO - general logging for debugging
-
+    def cmd_SAMPLE_HX(self, gcmd):
+        self.wire_load_cell.sensor.add_client(self.wire_tension_callback)
     def wire_tension_callback(self, msg: dict):
         # this is called every time the load cell sends a new sample
         # this timing is controlled by the load cell's update interval
@@ -165,7 +178,13 @@ class PowerCore:
         if not self.wire_tension_loop_enabled:
             return
         samples = msg["data"]
+        if not len(samples):
+            logging.info("no samples")
+            logging.info(f"msg: {msg}")
+            return
         sample = samples[-1]
+        logging.info(sample)
+        return
         # TODO: what units is the load sensor in?
         # do we need to normalize the data result at all?
         # probably should convert into grams or something?
@@ -186,7 +205,7 @@ class PowerCore:
             self.sender_wire_tool.set_speed(output)
 
     def cmd_SET_WIRE_FEED(self, gcmd):
-        speed = gcmd.get_float("speed")
+        speed = gcmd.get_float("SPEED")
         # if the tension loop is not running, set both motors to the same speed
         # otherwise, only set the primary motor speed - the control loop will handle the secondary motor
         if not self.wire_tension_loop_enabled:
@@ -235,11 +254,13 @@ class PowerCore:
 
     def _handle_connect(self):
         self.toolhead = self.printer.lookup_object("toolhead")
-        gcode_move = self.printer.lookup_object("gcode_move")
-        self.move_with_transform = gcode_move.set_move_transform(
-            self, force=True
-        )
-        self.patch_kinematics_module()
+        # self.wire_load_cell.sensor.add_client(self.wire_tension_callback)
+        if self.enable_move_feat:
+            gcode_move = self.printer.lookup_object("gcode_move")
+            self.move_with_transform = gcode_move.set_move_transform(
+                self, force=True
+            )
+            self.patch_kinematics_module()
 
     def cmd_set_powercore_feedrates(self, gcmd):
         min_feedrate = gcmd.get_float("MIN", self.min_feedrate)
@@ -398,16 +419,22 @@ class PowerCorePWMReader:
 
 
 class WireMover:
-    def __init__(self, toolhead, pin, cycle_time, hardware_pwm, scale):
+    def __init__(self, name, printer, pin, cycle_time, hardware_pwm, scale):
         values = {
             "pin": pin,
             "cycle_time": cycle_time,
             "hardware_pwm": hardware_pwm,
             "scale": scale,
         }
-        config = VirtualConfigFile(values)
+        config = VirtualConfigFile(f"wire_mover {name}", values, printer)
+        self.printer = printer
         self.pwm_tool = PrinterOutputPin(config)
-        self.toolhead = toolhead
+        self.toolhead = None
+        self.printer.register_event_handler(
+            "klippy:connect", self._handle_connect
+        )
+    def _handle_connect(self):
+        self.toolhead = self.printer.lookup_object("toolhead")        
 
     def set_speed(self, speed):
         print_time = self.toolhead.get_last_move_time()

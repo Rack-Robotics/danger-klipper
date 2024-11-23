@@ -175,13 +175,13 @@ class HX711(HX71xBase):
     def __init__(self, config):
         super(HX711, self).__init__(
             config,
-            "hx711",
+            sensor_type="hx711",
             # HX711 sps options
-            {80: 80, 10: 10},
-            80,
+            sample_rate_options={80: 80, 10: 10},
+            default_sample_rate=80,
             # HX711 gain/channel options
-            {"A-128": 1, "B-32": 2, "A-64": 3},
-            "A-128",
+            gain_options={"A-128": 1, "B-32": 2, "A-64": 3},
+            default_gain="A-128",
         )
 
 
@@ -189,13 +189,13 @@ class HX717(HX71xBase):
     def __init__(self, config):
         super(HX717, self).__init__(
             config,
-            "hx717",
+            sensor_type="hx717",
             # HX717 sps options
-            {320: 320, 80: 80, 20: 20, 10: 10},
-            320,
+            sample_rate_options={320: 320, 80: 80, 20: 20, 10: 10},
+            default_sample_rate=320,
             # HX717 gain/channel options
-            {"A-128": 1, "B-64": 2, "A-64": 3, "B-8": 4},
-            "A-128",
+            gain_options={"A-128": 1, "B-64": 2, "A-64": 3, "B-8": 4},
+            default_gain="A-128",
         )
 
 

@@ -95,6 +95,7 @@ class BatchBulkHelper:
         for client_cb in list(self.client_cbs):
             res = client_cb(msg)
             if not res:
+                logging.info("no more")
                 # This client no longer needs updates - unregister it
                 self.client_cbs.remove(client_cb)
                 if not self.client_cbs:
@@ -287,6 +288,7 @@ class FixedFreqReader:
 
     def _update_clock(self, is_reset=False):
         params = self.query_status_cmd.send([self.oid])
+        logging.info(f"params: {params}")
         mcu_clock = self.mcu.clock32_to_clock64(params["clock"])
         seq_diff = (params["next_sequence"] - self.last_sequence) & 0xFFFF
         self.last_sequence += seq_diff
