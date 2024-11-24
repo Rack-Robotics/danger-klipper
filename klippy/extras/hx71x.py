@@ -16,6 +16,7 @@ SAMPLE_ERROR_LONG_READ = 0x40000000
 
 # Implementation of HX711 and HX717
 class HX71xBase:
+    UPDATE_INTERVAL = UPDATE_INTERVAL
     def __init__(
         self,
         config,
@@ -91,7 +92,11 @@ class HX71xBase:
             oid=self.oid,
             cq=self.mcu.alloc_command_queue(),
         )
-
+        self.mcu.register_response(
+            self._handle_debug, "debug", self.oid
+        )
+    def _handle_debug(self, params):
+        logging.info(f"debug!!: {params}")
     def get_mcu(self):
         return self.mcu
 

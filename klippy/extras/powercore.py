@@ -85,7 +85,7 @@ class PowerCore:
             self.verbose_move_scaling_output = config.getboolean(
                 "verbose_move_scaling_output", False
             )
-
+            
             self.feedrate_pid_controller = PID(
                 Kp=config.getfloat("pid_kp", 0.1),
                 Ki=config.getfloat("pid_ki", 0.0),
@@ -111,24 +111,24 @@ class PowerCore:
         
 
         self.default_wire_tension_target = config.getfloat(
-            "default_wire_tension_target", 0.0
+            "default_wire_tension_target", 0.15
         )
-        # self.wire_pid_controller = PID(
-        #     Kp=config.getfloat("wire_pid_kp", 0.1),
-        #     Ki=config.getfloat("wire_pid_ki", 0.0),
-        #     Kd=config.getfloat("wire_pid_kd", 0.0),
-        #     setpoint=self.default_wire_tension_target,
-        #     output_limits=(0, 1),
-        #     sample_time=self.wire_load_cell.sensor.UPDATE_INTERVAL,
-        #     # TODO: could make this configurable?
-        #     time_fn=self.reactor.monotonic,
-        # )
-        self.wire_tension_loop_enabled = True
+        self.wire_pid_controller = PID(
+            Kp=config.getfloat("wire_pid_kp", 0.5),
+            Ki=config.getfloat("wire_pid_ki", 0.1),
+            Kd=config.getfloat("wire_pid_kd", 0.0),
+            setpoint=self.default_wire_tension_target,
+            output_limits=(0, 1),
+            sample_time=self.wire_load_cell.sensor.UPDATE_INTERVAL,
+            # TODO: could make this configurable?
+            time_fn=self.reactor.monotonic,
+        )
+        self.wire_tension_loop_enabled = False
         self.sender_wire_tool = WireMover(
             "sender",
             self.printer,
             config.get("sender_wire_motor_pin"),
-            config.getfloat("sender_wire_cycle_time", 0.1),
+            config.getfloat("sender_wire_cycle_time", 0.01),
             config.getboolean("sender_wire_hardware_pwm", False),
             config.getfloat("sender_wire_scale", 1.0),
         )
@@ -136,7 +136,7 @@ class PowerCore:
             "receiver",
             self.printer,
             config.get("receiver_wire_motor_pin"),
-            config.getfloat("receiver_wire_cycle_time", 0.1),
+            config.getfloat("receiver_wire_cycle_time", 0.01),
             config.getboolean("receiver_wire_hardware_pwm", False),
             config.getfloat("receiver_wire_scale", 1.0),
         )
@@ -162,10 +162,18 @@ class PowerCore:
             desc="reset the wire tension pid controller",
         )
         self.gcode.register_command(
+            "SET_WIRE_PID_PARAMS",
+            self.cmd_SET_WIRE_PID_PARAMS,
+            desc="set params for pid controller",
+        )
+        self.gcode.register_command(
             "SAMPLE_HX",
             self.cmd_SAMPLE_HX,
             desc="adds client"
         )
+        self.last_sample = 0.0
+        self.primary_speed = 0
+        self.follower_speed = 0
         # TODO - load routines / macros
         # TODO - invidual motor control commands for debugging
         # TODO - general logging for debugging
@@ -176,15 +184,13 @@ class PowerCore:
         # this timing is controlled by the load cell's update interval
         # default is 0.1s (set in `UPDATE_INTERVAL` in the sensor classes)
         if not self.wire_tension_loop_enabled:
-            return
+            return False
         samples = msg["data"]
         if not len(samples):
-            logging.info("no samples")
-            logging.info(f"msg: {msg}")
-            return
-        sample = samples[-1]
-        logging.info(sample)
-        return
+            sample = self.last_sample
+        else:
+            sample = samples[-1][1]
+            self.last_sample = sample
         # TODO: what units is the load sensor in?
         # do we need to normalize the data result at all?
         # probably should convert into grams or something?
@@ -196,26 +202,43 @@ class PowerCore:
         # there might be a better way to do the pid to account for all of the samples,
         # but we'd need timing info for each one, so the pid controller knows what's up.
         # otherwise, it could end up super jittery.
+        _, range_max = self.wire_load_cell.sensor.get_range()
+        sample = sample / range_max
+
+        max_force = 0.3
+        sample = sample / max_force
+        if sample > 1:
+            sample = 1.0
+        logging.info(f"sample: {sample}")
         output = self.wire_pid_controller(sample)
-        # scale output from 0-1 to 0-255 for motor speed control
-        output = round(output * 255)
+        output = round(output, 2)
+        logging.info(f"output: {output}")
+        self.set_follower_speed(output)
+        return True
+
+    def set_follower_speed(self, speed):
+        self.follower_speed = speed
         if self.sender_is_primary:
-            self.receiver_wire_tool.set_speed(output)
+            self.receiver_wire_tool.set_speed(speed)
         else:
-            self.sender_wire_tool.set_speed(output)
+            self.sender_wire_tool.set_speed(speed)
+            
+    def set_primary_speed(self, speed):
+        self.primary_speed = speed
+        if self.sender_is_primary:
+            self.sender_wire_tool.set_speed(speed)
+        else:
+            self.receiver_wire_tool.set_speed(speed)
 
     def cmd_SET_WIRE_FEED(self, gcmd):
         speed = gcmd.get_float("SPEED")
         # if the tension loop is not running, set both motors to the same speed
         # otherwise, only set the primary motor speed - the control loop will handle the secondary motor
         if not self.wire_tension_loop_enabled:
-            self.sender_wire_tool.set_speed(speed)
-            self.receiver_wire_tool.set_speed(speed)
+            self.set_follower_speed(speed)
+            self.set_primary_speed(speed)
         else:
-            if self.sender_is_primary:
-                self.sender_wire_tool.set_speed(speed)
-            else:
-                self.receiver_wire_tool.set_speed(speed)
+            self.set_primary_speed(speed)
         gcmd.respond_info(f"Wire feed speed set to: {speed}")
 
     def cmd_SET_WIRE_TENSION_TARGET(self, gcmd):
@@ -231,13 +254,22 @@ class PowerCore:
         if self.wire_tension_loop_enabled:
             # reset the pid controller when enabling the loop, we are starting fresh
             self.wire_pid_controller.reset()
+            self.wire_load_cell.sensor.add_client(self.wire_tension_callback)
             gcmd.respond_info("Wire tension loop enabled")
         else:
+            self.set_follower_speed(self.primary_speed)
             gcmd.respond_info("Wire tension loop disabled")
 
     def cmd_RESET_WIRE_TENSION_PID(self, gcmd):
         self.wire_pid_controller.reset()
         gcmd.respond_info("Wire tension PID controller reset")
+
+    def cmd_SET_WIRE_PID_PARAMS(self, gcmd):
+        kp = gcmd.get_float("P", self.wire_pid_controller.Kp)
+        ki = gcmd.get_float("I", self.wire_pid_controller.Ki)
+        kd = gcmd.get_float("D", self.wire_pid_controller.Kd)
+        self.wire_pid_controller.tunings = (kp, ki, kd)
+        gcmd.respond_info(f"PID Params: Kp: {kp}, Ki: {ki}, Kd: {kd}")
 
     def pwm_in_callback(self, duty_cycle):
         if not self.scaling_enabled:
@@ -254,7 +286,7 @@ class PowerCore:
 
     def _handle_connect(self):
         self.toolhead = self.printer.lookup_object("toolhead")
-        # self.wire_load_cell.sensor.add_client(self.wire_tension_callback)
+        
         if self.enable_move_feat:
             gcode_move = self.printer.lookup_object("gcode_move")
             self.move_with_transform = gcode_move.set_move_transform(
@@ -287,9 +319,9 @@ class PowerCore:
         gcmd.respond_info(f"Target duty cycle: {target_duty_cycle}")
 
     def cmd_set_pid_params(self, gcmd):
-        kp = gcmd.get_float("KP", self.feedrate_pid_controller.Kp)
-        ki = gcmd.get_float("KI", self.feedrate_pid_controller.Ki)
-        kd = gcmd.get_float("KD", self.feedrate_pid_controller.Kd)
+        kp = gcmd.get_float("P", self.feedrate_pid_controller.Kp)
+        ki = gcmd.get_float("I", self.feedrate_pid_controller.Ki)
+        kd = gcmd.get_float("D", self.feedrate_pid_controller.Kd)
         self.feedrate_pid_controller.tunings = (kp, ki, kd)
         gcmd.respond_info(f"PID Params: Kp: {kp}, Ki: {ki}, Kd: {kd}")
 

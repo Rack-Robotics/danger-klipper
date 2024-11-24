@@ -167,7 +167,7 @@ hx71x_read_adc(struct hx71x_adc *hx71x, uint8_t oid)
     }
 
     // Add measurement to buffer
-    add_sample(hx71x, oid, counts, false);
+    add_sample(hx71x, oid, counts, true);
 }
 
 // Create a hx71x sensor
