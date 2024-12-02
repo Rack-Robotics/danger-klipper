@@ -8,11 +8,16 @@
 
 ## Additional configuration options
 
+- [`[mcu] is_non_critical`](./Config_Reference.md#mcu) enables marking of an mcu as optional - it can be freely disconnected and connected at will. (useful for MCU-based accelerometer boards, mcu-based probes that shut down in hot chambers, etc...)
 - [`[danger_options]`](./Config_Reference.md#danger-options) - New configuration options to adjust klipper values that were previously hidden
 - Additional kinematics versions enabled per-axis acceleration, see [limited_cartesian](./Config_Reference.md#⚠️-cartesian-kinematics-with-limits-for-x-and-y-axes) and [limited_corexy](./Config_Reference.md#⚠️-corexy-kinematics-with-limits-for-x-and-y-axes)
 - `--rotate-log-at-restart` can be added to your klipper start script or service to force log rotation every restart.
 - [`[virtual_sdcard] with_subdirs`](./Config_Reference.md#virtual_sdcard) enables scanning of subdirectories for .gcode files, for the menu and M20/M23 commands
 - [`[firmware_retraction] z_hop_height`](./Config_Reference.md#firmware_retraction) adds an automatic z hop when using firmware retraction
+
+## Enhanced behavior
+
+- [`canbus_query.py`](./CANBUS.md#️-finding-the-canbus_uuid-for-new-micro-controllers) now responds with all Danger-Klipper devices, even after they've been assigned a node_id.
 
 ## New Klipper Modules
 
@@ -32,9 +37,12 @@
 - [`[z_calibration]`](./Config_Reference.md#⚠️-z_calibration) enables automatic probe Z offset calibration using a reference endstop like the Voron 2.4 nozzle endstop.
 - [`[z_tilt_ng]`](./Config_Reference.md#z_tilt_ng) adds enforced 3-point z tilt calibration
 - [`[z_tilt/quad_gantry_level] increasing_threshold`](./Config_Reference.md#z_tilt) allows you to customize the allowed variation when probing multiple times
+- [`[z_tilt/quad_gantry_level] adaptive_horizontal_move_z`](./Config_Reference.md#z_tilt) adaptively decrease horizontal_move_z based on resulting error - z_tilt and QGL faster and safer!
+- [`[safe_z_home] home_y_before_x`](./Config_Reference.md#safe_z_home) let you home Y before X.
 
 ## Heaters, Fans, and PID changes
 
+- [Model Predictive Control](./MPC.md) is an advanced temperature control method that offers an alternative to traditional PID control.
 - [Velocity PID](./PID.md) can be more accurate than positional PID, but is more susceptible to noisy sensors and may require larger smoothing times
 - [`PID_PROFILE [LOAD/SAVE]`](./G-Codes.md#pid_profile) allows you to calibrate and save PID profiles at multiple temperatures and fan speeds, and later restore them. With some clever macros, automatic per-material pid tuning is within reach!
 - [`SET_HEATER_PID HEATER= KP= KI= KD=`](./G-Codes.md#set_heater_pid) can update your PID parameters without a reload.
@@ -50,8 +58,10 @@
 - The jinja `do` extension has been enabled. You can now call functions in your macros without resorting to dirty hacks: `{% do array.append(5) %}`
 - The python [`math`](https://docs.python.org/3/library/math.html) library is available to macros. `{math.sin(math.pi * variable)}` and more!
 - New [`RELOAD_GCODE_MACROS`](./G-Codes.md#reload_gcode_macros) G-Code command to reload `[gcode_macro]` templates without requiring a restart.
+- G-Code Macros can be written in Python. Read more [here](./Command_Templates.md)
 
 ## [Plugins](./Plugins.md)
+
 Extend your Danger Klipper installation with custom plugins.
 
 Your python plugins can now extend [`klippy/extras`](https://github.com/DangerKlippers/danger-klipper/tree/master/klippy/extras) adding new modules to klipper without causing updates to fail due to a "dirty" git tree.

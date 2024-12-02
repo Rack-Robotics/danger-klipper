@@ -26,15 +26,17 @@ See the [Danger Features document](https://dangerklipper.io/Danger_Features.html
 
 - [fan: reverse FAN](https://github.com/DangerKlippers/danger-klipper/pull/51) ([klipper#4983](https://github.com/Klipper3d/klipper/pull/4983))
 
-- [heater: modify PID without reload](https://github.com/DangerKlippers/danger-klipper/pull/35)
+- [heaters: modify PID without reload](https://github.com/DangerKlippers/danger-klipper/pull/35)
 
-- [heater: velocity PID](https://github.com/DangerKlippers/danger-klipper/pull/47) ([klipper#6272](https://github.com/Klipper3d/klipper/pull/6272))
+- [heaters: MPC temperature control](https://github.com/DangerKlippers/danger-klipper/pull/333)
 
-- [heater: PID-Profiles](https://github.com/DangerKlippers/danger-klipper/pull/162)
+- [heaters: velocity PID](https://github.com/DangerKlippers/danger-klipper/pull/47) ([klipper#6272](https://github.com/Klipper3d/klipper/pull/6272))
 
-- [heater: expose heater thermistor out of min/max](https://github.com/DangerKlippers/danger-klipper/pull/182)
+- [heaters: PID-Profiles](https://github.com/DangerKlippers/danger-klipper/pull/162)
 
-- [heater/fan: new heated_fan module](https://github.com/DangerKlippers/danger-klipper/pull/259)
+- [heaters: expose heater thermistor out of min/max](https://github.com/DangerKlippers/danger-klipper/pull/182)
+
+- [heaters/fan: new heated_fan module](https://github.com/DangerKlippers/danger-klipper/pull/259)
 
 - [gcode: jinja2.ext.do extension](https://github.com/DangerKlippers/danger-klipper/pull/26) ([klipper#5149](https://github.com/Klipper3d/klipper/pull/5149))
 
@@ -116,14 +118,20 @@ See the [Danger Features document](https://dangerklipper.io/Danger_Features.html
 
 - [mcu: support for AT32F403](https://github.com/DangerKlippers/danger-klipper/pull/284)
 
+- [z_tilt, quad_gantry_level: adaptive horizontal move z](https://github.com/DangerKlippers/danger-klipper/pull/336)
+
+- [core: non-critical-mcus](https://github.com/DangerKlippers/danger-klipper/pull/339)
+
+- [gcode_macros: !python templates](https://github.com/DangerKlippers/danger-klipper/pull/360)
+
+- [core: action_log](https://github.com/DangerKlippers/danger-klipper/pull/367)
+
+- [danger_options: configurable homing constants](https://github.com/DangerKlippers/danger-klipper/pull/378)
+
 If you're feeling adventurous, take a peek at the extra features in the bleeding-edge-v2 branch [feature documentation](docs/Bleeding_Edge.md)
 and [feature configuration reference](docs/Config_Reference_Bleeding_Edge.md):
 
-- [heaters: mpc temperature control](https://github.com/DangerKlippers/danger-klipper/pull/268)
-
 - [extruder/pa: do not smooth base extruder position, only advance](https://github.com/DangerKlippers/danger-klipper/pull/266)
-
-- [core: non-critical-mcus](https://github.com/DangerKlippers/danger-klipper/pull/265)
 
 - [dmbutyugin's advanced-features branch - Pull Request #262](https://github.com/DangerKlippers/danger-klipper/pull/262)
   - stepper: high precision stepping protocol
@@ -156,21 +164,17 @@ sudo systemctl restart klipper
 
 ### Option 2. Using KIAUH
 
-For users that are not comfortable using Git directly, [KIAUH](https://github.com/dw-0/kiauh) is able to use custom repositories.
+For users that are not comfortable using Git directly, [KIAUH v6](https://github.com/dw-0/kiauh) is able to use custom repositories.
 
-To do this, add the Danger Klipper repo to KIAUH's repo list and run the script with the following commands:
-
-```bash
-echo "DangerKlippers/danger-klipper" >> ~/kiauh/klipper_repos.txt
-~/kiauh/kiauh.sh
-```
+To do this, add the Danger Klipper repo to KIAUH's custom repository settings with the following steps:
 
 From the KIAUH menu select:
 
-- 6 ) Settings
-- 1 ) Set custom Klipper repository
-- Select the number corresponding to DangerKlipper from the list shown
-- Select 'Y' to confirm replacing your existing Klipper install
+- [S] Settings
+- 1\) Set custom Klipper repository
+- Use `https://github.com/DangerKlippers/danger-klipper` as the new repository URL
+- Use `master` or `bleeding-edge-v2` as the new branch name
+- Select 'Y' to apply the changes
 - Enter 'B' for back twice
 - 'Q' to quit
 
