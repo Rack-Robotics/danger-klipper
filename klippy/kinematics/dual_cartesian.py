@@ -6,6 +6,41 @@
 # This file may be distributed under the terms of the GNU GPLv3 license.
 import stepper
 
+class EDMCoord:
+    def __init__(self, x, y, u, v, e=0.):
+        self.x, self.y = x, y
+        self.u, self.v = u, v
+        self.e = e
+    def __getitem__(self, i):
+        if i == 0: return self.x
+        if i == 1: return self.y
+        if i == 2: return self.u
+        if i == 3: return self.v
+        if i == 4: return self.e
+        raise IndexError
+    def __add__(self, other):
+        return EDMCoord(self.x + other[0], self.y + other[1],
+                       self.u + other[2], self.v + other[3],
+                       self.e + other[4])
+    def __sub__(self, other):
+        return EDMCoord(self.x - other[0], self.y - other[1],
+                       self.u - other[2], self.v - other[3],
+                       self.e - other[4])
+    def __mul__(self, other):
+        return EDMCoord(self.x * other, self.y * other,
+                       self.u * other, self.v * other,
+                       self.e * other)
+    def __truediv__(self, other):
+        return EDMCoord(self.x / other, self.y / other,
+                       self.u / other, self.v / other,
+                       self.e / other)
+    def __str__(self):
+        return "(%s, %s, %s, %s, %s)" % (self.x, self.y, self.u, self.v, self.e)
+    def __repr__(self):
+        return self.__str__()
+    def as_list(self):
+        return [self.x, self.y, self.u, self.v, self.e]
+
 class WireEDMKinematics:
     def __init__(self, toolhead, config):
         self.printer = config.get_printer()
@@ -28,8 +63,12 @@ class WireEDMKinematics:
             
         # Get range of motion for each rail
         ranges = [r.get_range() for r in self.rails]
-        self.axes_min = toolhead.Coord(*[r[0] for r in ranges], e=0.0)
-        self.axes_max = toolhead.Coord(*[r[1] for r in ranges], e=0.0)
+        
+        # Initialize min/max coordinates
+        self.axes_min = EDMCoord(ranges[0][0], ranges[1][0],
+                                ranges[2][0], ranges[3][0], 0.)
+        self.axes_max = EDMCoord(ranges[0][1], ranges[1][1],
+                                ranges[2][1], ranges[3][1], 0.)
         
         # Register steppers
         for s in self.get_steppers():
@@ -108,12 +147,12 @@ class WireEDMKinematics:
             vpos < limits[3][0] or vpos > limits[3][1]):
             self._check_endstops(move)
 
-    def get_status(self, eventtime):
+    def get_status(self, eventtime=None):
         axes = [a for a, (l, h) in zip("xyuv", self.limits) if l <= h]
         return {
             "homed_axes": "".join(axes),
-            "axis_minimum": self.axes_min,
-            "axis_maximum": self.axes_max,
+            "axis_minimum": self.axes_min.as_list(),
+            "axis_maximum": self.axes_max.as_list(),
         }
 
 def load_kinematics(toolhead, config):
