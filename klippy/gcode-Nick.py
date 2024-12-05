@@ -10,7 +10,7 @@ class CommandError(Exception):
     pass
 
 
-Coord = collections.namedtuple("Coord", ("x", "y", "z", "u", "v", "e"))
+Coord = collections.namedtuple("Coord", ("x", "y", "z", "e"))
 
 
 class GCodeCommand:

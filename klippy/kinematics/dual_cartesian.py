@@ -53,13 +53,11 @@ class WireEDMKinematics:
         ]
         
         # Setup itersolve for each rail
-        # X and U are horizontal motion
-        # Y and V are vertical motion
         for rail, axis in zip(self.rails[:2], 'xy'):
             rail.setup_itersolve('cartesian_stepper_alloc', axis.encode())
-        # U and V rails are set up as additional X/Y axes
-        self.rails[2].setup_itersolve('cartesian_stepper_alloc', 'x'.encode())  # U rail
-        self.rails[3].setup_itersolve('cartesian_stepper_alloc', 'y'.encode())  # V rail
+        # Should be changed to use unique encodings:
+        self.rails[2].setup_itersolve('cartesian_stepper_alloc', 'u'.encode())  # U rail 
+        self.rails[3].setup_itersolve('cartesian_stepper_alloc', 'v'.encode())  # V rail
             
         # Get range of motion for each rail
         ranges = [r.get_range() for r in self.rails]

@@ -139,7 +139,9 @@ check_active(struct stepper_kinematics *sk, struct move *m)
     int af = sk->active_flags;
     return ((af & AF_X && m->axes_r.x != 0.)
             || (af & AF_Y && m->axes_r.y != 0.)
-            || (af & AF_Z && m->axes_r.z != 0.));
+            || (af & AF_Z && m->axes_r.z != 0.)
+            || (af & AF_U && m->axes_r.u != 0.)
+            || (af & AF_V && m->axes_r.v != 0.));
 }
 
 // Generate step times for a range of moves on the trapq
@@ -234,9 +236,14 @@ itersolve_check_active(struct stepper_kinematics *sk, double flush_time)
 int32_t __visible
 itersolve_is_active_axis(struct stepper_kinematics *sk, char axis)
 {
-    if (axis < 'x' || axis > 'z')
-        return 0;
-    return (sk->active_flags & (AF_X << (axis - 'x'))) != 0;
+    switch(axis) {
+        case 'x': return (sk->active_flags & AF_X) != 0;
+        case 'y': return (sk->active_flags & AF_Y) != 0;
+        case 'z': return (sk->active_flags & AF_Z) != 0;
+        case 'u': return (sk->active_flags & AF_U) != 0;
+        case 'v': return (sk->active_flags & AF_V) != 0;
+        default: return 0;
+    }
 }
 
 void __visible
