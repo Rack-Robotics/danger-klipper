@@ -32,6 +32,20 @@ cart_stepper_z_calc_position(struct stepper_kinematics *sk, struct move *m
     return move_get_coord(m, move_time).z;
 }
 
+static double
+cart_stepper_u_calc_position(struct stepper_kinematics *sk, struct move *m
+                             , double move_time)
+{
+    return move_get_coord(m, move_time).u;
+}
+
+static double
+cart_stepper_v_calc_position(struct stepper_kinematics *sk, struct move *m
+                             , double move_time)
+{
+    return move_get_coord(m, move_time).v;
+}
+
 struct stepper_kinematics * __visible
 cartesian_stepper_alloc(char axis)
 {
@@ -46,6 +60,12 @@ cartesian_stepper_alloc(char axis)
     } else if (axis == 'z') {
         sk->calc_position_cb = cart_stepper_z_calc_position;
         sk->active_flags = AF_Z;
+    } else if (axis == 'u') {
+        sk->calc_position_cb = cart_stepper_u_calc_position;
+        sk->active_flags = AF_U;
+    } else if (axis == 'v') {
+        sk->calc_position_cb = cart_stepper_v_calc_position;
+        sk->active_flags = AF_V;
     }
     return sk;
 }
